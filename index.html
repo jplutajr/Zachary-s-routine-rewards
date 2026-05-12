@@ -204,10 +204,11 @@ const ROUTINES={
   Joseph:[
     {id:"morningReady",title:"Morning Ready",subtitle:"Got ready without distracting",iconIndex:0,script:"Your job is Big Kid Ready: get yourself ready and let Zach work on his routine.",steps:[{id:"ready",label:"Got ready in the morning",points:1}],bonus:0},
     {id:"leaveReady",title:"Leaving Ready",subtitle:"Left calmly",iconIndex:1,script:"Your job is to get ready to leave calmly.",steps:[{id:"leave",label:"Got ready to leave calmly",points:1}],bonus:0},
-    {id:"giveSpace",title:"Give Space",subtitle:"Space, not bossing",iconIndex:2,script:"Your job is space, not bossing. Let Zach work.",steps:[{id:"space",label:"Gave Zach space when asked",points:1}],bonus:0},
-    {id:"brotherHelper",title:"Brother Helper",subtitle:"Helped calmly when asked",iconIndex:3,script:"Help only when asked. Calm helping earns.",steps:[{id:"help",label:"Helped Zach calmly when asked",points:1}],bonus:0},
+    {id:"giveSpace",title:"Give Space",subtitle:"Space, not bossing",iconIndex:2,script:"Your job is space, not bossing. Let Zach work.",steps:[{id:"space",label:"Gave Zach space when asked",points:2}],bonus:0},
+    {id:"brotherHelper",title:"Brother Helper",subtitle:"Helped calmly when asked",iconIndex:3,script:"Help only when asked. Calm helping earns.",steps:[{id:"help",label:"Helped Zach calmly when asked",points:2}],bonus:0},
+    {id:"parentHelper",title:"Mom & Dad Helper",subtitle:"Helped mom or dad",iconIndex:5,script:"Big kid helper: help Mom or Dad when asked, then get back to your job.",steps:[{id:"parentHelp",label:"Helped Mom or Dad",points:2}],bonus:0},
     {id:"bedtimeReady",title:"Bedtime Routine",subtitle:"Finished bedtime routine",iconIndex:4,script:"Big Kid bedtime: finish your bedtime routine calmly.",steps:[{id:"bed",label:"Finished bedtime routine",points:1}],bonus:0},
-    {id:"kindBody",title:"Kind and Safe",subtitle:"Kind words, safe body",iconIndex:5,script:"Kind words and safe body with your brother.",steps:[{id:"kind",label:"Used kind words and safe body",points:1}],bonus:0}
+    {id:"kindBody",title:"Kind and Safe",subtitle:"Kind words, safe body",iconIndex:5,script:"Kind words and safe body with your brother.",steps:[{id:"kind",label:"Used kind words and safe body",points:2}],bonus:0}
   ]
 };
 
@@ -223,6 +224,7 @@ let state=loadState();
 let activeRoutine=null;
 let activeStepIds=new Set();
 let ignoreCloudUntil=0;
+let pendingEventIds=new Set();
 
 const $=id=>document.getElementById(id);
 const els={
@@ -370,7 +372,7 @@ function openRoutine(id){
   els.safeBonus.style.display=state.activeChild==="Zach"?"block":"none";
   els.modalIcon.textContent=theme.icons[activeRoutine.iconIndex]||"⭐";
   els.modalRoutineTitle.textContent=activeRoutine.title;
-  els.scriptBox.textContent=activeRoutine.script;
+  els.scriptBox.textContent=activeRoutine.script+" Tap a saved step again to undo it.";
   renderSteps();
   els.routineModal.classList.add("open");
 }
@@ -382,7 +384,7 @@ function renderSteps(){
     const button=document.createElement("button");
     button.type="button";
     button.className=`step-btn ${done?"done":""}`;
-    button.innerHTML=`<span class="step-name"><span class="check">${done?"✓":""}</span>${step.label}</span><span>${done?"Saved":`+${getStepPoints(activeRoutine.id,step)}`}</span>`;
+    button.innerHTML=`<span class="step-name"><span class="check">${done?"✓":""}</span>${step.label}</span><span>${done?"Tap to undo":`+${getStepPoints(activeRoutine.id,step)}`}</span>`;
     button.addEventListener("click",()=>toggleStep(step.id));
     els.stepsList.appendChild(button);
   });
@@ -390,9 +392,14 @@ function renderSteps(){
 
 function toggleStep(stepId){
   if(!activeRoutine)return;
-  if(activeStepIds.has(stepId))return;
   const step=activeRoutine.steps.find(item=>item.id===stepId);
   if(!step)return;
+
+  if(activeStepIds.has(stepId)){
+    undoSavedStep(step);
+    return;
+  }
+
   activeStepIds.add(stepId);
   const progress=getRoutineProgress(activeRoutine.id);
   progress.steps=Array.from(activeStepIds);
@@ -400,6 +407,50 @@ function toggleStep(stepId){
   renderSteps();
   renderRoutines(activeTheme());
   addPoints(getStepPoints(activeRoutine.id,step),`${activeRoutine.title}: ${step.label}`,activeRoutine.title);
+}
+
+function undoSavedStep(step){
+  if(!activeRoutine||!step)return;
+
+  const points=getStepPoints(activeRoutine.id,step);
+  const label=`${activeRoutine.title}: ${step.label}`;
+
+  if(!confirm(`Undo "${step.label}" and remove ${points} point${points===1?"":"s"}?`))return;
+
+  activeStepIds.delete(step.id);
+
+  const progress=getRoutineProgress(activeRoutine.id);
+  progress.steps=Array.from(activeStepIds);
+
+  if(progress.bonusAwarded){
+    progress.bonusAwarded=false;
+  }
+
+  const currentChildState=childState();
+  currentChildState.points=Math.max(0,currentChildState.points-Number(points||0));
+
+  const matchIndex=currentChildState.log.map(entry=>entry.label).lastIndexOf(label);
+  if(matchIndex>=0){
+    currentChildState.log.splice(matchIndex,1);
+  }
+
+  saveState();
+  renderSteps();
+  render();
+
+  ignoreCloudUntil=Date.now()+12000;
+  const eventId=makeEventId("undoitem",state.activeChild,activeRoutine.title,label);
+
+  cloudRequest("undoItem",{
+    child:state.activeChild,
+    routine:activeRoutine.title,
+    label,
+    points,
+    parent:PARENT_NAME,
+    eventId
+  })
+    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{});
 }
 
 function getRoutineProgress(routineId,child=state.activeChild){
@@ -440,16 +491,35 @@ function closeRoutineModal(){
   activeStepIds=new Set();
 }
 
+function makeEventId(action,child,routine,label){
+  const safeAction=String(action||"event").replace(/[^a-zA-Z0-9_-]/g,"");
+  const random=Math.random().toString(36).slice(2,10);
+  return `${safeAction}_${child}_${Date.now()}_${random}`;
+}
+
 function addPoints(points,label,routine=""){
+  const eventId=makeEventId("add",state.activeChild,routine,label);
+  if(pendingEventIds.has(eventId)) return;
+  pendingEventIds.add(eventId);
+
   const currentChildState=childState();
   currentChildState.points+=Number(points);
   currentChildState.log.push({points:Number(points),label,time:new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})});
   saveState();
   render();
+
   ignoreCloudUntil=Date.now()+12000;
-  cloudRequest("add",{child:state.activeChild,points,label,routine,parent:PARENT_NAME,tokenType:CHILDREN[state.activeChild].token})
-    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{});
+  cloudRequest("add",{
+    child:state.activeChild,
+    points,
+    label,
+    routine,
+    parent:PARENT_NAME,
+    tokenType:CHILDREN[state.activeChild].token,
+    eventId
+  })
+    .then(cloud=>{pendingEventIds.delete(eventId);ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{pendingEventIds.delete(eventId)});
 }
 
 function undoLast(){
@@ -461,33 +531,39 @@ function undoLast(){
   saveState();
   render();
   ignoreCloudUntil=Date.now()+12000;
-  cloudRequest("undo",{child:state.activeChild,parent:PARENT_NAME})
+  const eventId=makeEventId("undo",state.activeChild,"","Undo Last");
+  cloudRequest("undo",{child:state.activeChild,parent:PARENT_NAME,eventId})
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
     .catch(()=>{});
 }
 
 function parentReset(){
   if(!confirm(`Parent reset for ${state.activeChild}? This clears banked points for this child only.`))return;
+  const eventId=makeEventId("reset",state.activeChild,"","Parent reset");
   resetLocalChild(state.activeChild);
   saveState();
   render();
   ignoreCloudUntil=Date.now()+12000;
-  cloudRequest("reset",{child:state.activeChild,parent:PARENT_NAME})
-    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{});
+  els.parentReset.disabled=true;
+  cloudRequest("reset",{child:state.activeChild,parent:PARENT_NAME,eventId})
+    .then(cloud=>{els.parentReset.disabled=false;ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{els.parentReset.disabled=false});
 }
 
 function claimPrize(){
   const max=maxReward();
   if(!max)return;
   if(!confirm(`${state.activeChild} claimed: ${max.label}. Reset ${state.activeChild}'s points to 0?`))return;
+  const eventId=makeEventId("claim",state.activeChild,"Prize claimed",max.label);
   resetLocalChild(state.activeChild);
   saveState();
   render();
   ignoreCloudUntil=Date.now()+12000;
-  cloudRequest("claim",{child:state.activeChild,parent:PARENT_NAME,prize:max.label,points:max.points})
-    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{});
+  els.claimPrize.disabled=true;
+  els.claimPrize.textContent="Saving prize claim...";
+  cloudRequest("claim",{child:state.activeChild,parent:PARENT_NAME,prize:max.label,points:max.points,eventId})
+    .then(cloud=>{els.claimPrize.disabled=false;els.claimPrize.textContent="Prize Claimed — Reset Points";ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{els.claimPrize.disabled=false;els.claimPrize.textContent="Prize Claimed — Reset Points"});
 }
 
 function resetLocalChild(child){
@@ -552,7 +628,8 @@ function saveSettings(){
     theme:childState().theme,
     rewards:JSON.stringify(childState().rewards),
     activityPoints:JSON.stringify(childState().activityPoints),
-    parent:PARENT_NAME
+    parent:PARENT_NAME,
+    eventId:makeEventId("settings",state.activeChild,"","settings")
   })
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
     .catch(()=>{});
@@ -565,7 +642,7 @@ function cycleTheme(){
   childState().theme=keys[(currentIndex+1)%keys.length];
   saveState();
   render();
-  cloudRequest("settings",{child:state.activeChild,theme:childState().theme,rewards:JSON.stringify(childRewards()),activityPoints:JSON.stringify(activityConfig()),parent:PARENT_NAME})
+  cloudRequest("settings",{child:state.activeChild,theme:childState().theme,rewards:JSON.stringify(childRewards()),activityPoints:JSON.stringify(activityConfig()),parent:PARENT_NAME,eventId:makeEventId("settings",state.activeChild,"","theme")})
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
     .catch(()=>{});
 }
