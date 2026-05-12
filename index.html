@@ -69,6 +69,7 @@
     .control-btn.primary{background:var(--green);color:white}
     .control-btn.warning{background:#fff7ed;color:#c2410c}
     .control-btn:disabled{opacity:.65;cursor:not-allowed}
+    button:disabled{opacity:.65;cursor:not-allowed}
     .history-card{margin-top:16px;background:rgba(255,255,255,.72);border-radius:var(--radius);padding:14px;box-shadow:0 8px 20px rgba(31,41,55,.1)}
     .history-card h3{margin:0 0 10px;font-size:1rem}
     .log-list{display:grid;gap:8px;max-height:190px;overflow:auto}
@@ -225,6 +226,7 @@ let activeRoutine=null;
 let activeStepIds=new Set();
 let ignoreCloudUntil=0;
 let pendingEventIds=new Set();
+let actionInFlight=false;
 
 const $=id=>document.getElementById(id);
 const els={
@@ -239,6 +241,16 @@ function init(){
   syncFromCloud();
   setInterval(syncFromCloud,30000);
   document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncFromCloud()});
+}
+
+function setActionLock(locked){
+  actionInFlight=locked;
+  [els.undoPoint,els.parentReset,els.claimPrize,els.addCustom,els.finishTask,els.safeBonus,els.saveSettings,els.themeButton].forEach(button=>{
+    if(button) button.disabled=locked;
+  });
+  document.querySelectorAll(".child-btn,.step-btn").forEach(button=>{
+    button.disabled=locked;
+  });
 }
 
 function bindEvents(){
@@ -438,7 +450,8 @@ function undoSavedStep(step){
   renderSteps();
   render();
 
-  ignoreCloudUntil=Date.now()+12000;
+  ignoreCloudUntil=Date.now()+20000;
+  setActionLock(true);
   const eventId=makeEventId("undoitem",state.activeChild,activeRoutine.title,label);
 
   cloudRequest("undoItem",{
@@ -450,7 +463,8 @@ function undoSavedStep(step){
     eventId
   })
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{});
+    .catch(()=>{})
+    .finally(()=>{setActionLock(false);render();});
 }
 
 function getRoutineProgress(routineId,child=state.activeChild){
@@ -530,11 +544,13 @@ function undoLast(){
   rebuildRoutineProgressFromLog(state.activeChild);
   saveState();
   render();
-  ignoreCloudUntil=Date.now()+12000;
+  ignoreCloudUntil=Date.now()+20000;
+  setActionLock(true);
   const eventId=makeEventId("undo",state.activeChild,"","Undo Last");
   cloudRequest("undo",{child:state.activeChild,parent:PARENT_NAME,eventId})
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{});
+    .catch(()=>{})
+    .finally(()=>{setActionLock(false);render();});
 }
 
 function parentReset(){
@@ -543,11 +559,12 @@ function parentReset(){
   resetLocalChild(state.activeChild);
   saveState();
   render();
-  ignoreCloudUntil=Date.now()+12000;
-  els.parentReset.disabled=true;
+  ignoreCloudUntil=Date.now()+20000;
+  setActionLock(true);
   cloudRequest("reset",{child:state.activeChild,parent:PARENT_NAME,eventId})
-    .then(cloud=>{els.parentReset.disabled=false;ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{els.parentReset.disabled=false});
+    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{})
+    .finally(()=>{setActionLock(false);render();});
 }
 
 function claimPrize(){
@@ -558,12 +575,13 @@ function claimPrize(){
   resetLocalChild(state.activeChild);
   saveState();
   render();
-  ignoreCloudUntil=Date.now()+12000;
-  els.claimPrize.disabled=true;
+  ignoreCloudUntil=Date.now()+20000;
+  setActionLock(true);
   els.claimPrize.textContent="Saving prize claim...";
   cloudRequest("claim",{child:state.activeChild,parent:PARENT_NAME,prize:max.label,points:max.points,eventId})
-    .then(cloud=>{els.claimPrize.disabled=false;els.claimPrize.textContent="Prize Claimed — Reset Points";ignoreCloudUntil=0;applyCloudState(cloud)})
-    .catch(()=>{els.claimPrize.disabled=false;els.claimPrize.textContent="Prize Claimed — Reset Points"});
+    .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
+    .catch(()=>{})
+    .finally(()=>{els.claimPrize.textContent="Prize Claimed — Reset Points";setActionLock(false);render();});
 }
 
 function resetLocalChild(child){
@@ -649,6 +667,7 @@ function cycleTheme(){
 
 function syncFromCloud(){
   if(!CLOUD_WEB_APP_URL)return Promise.resolve(null);
+  if(actionInFlight)return Promise.resolve(null);
   if(Date.now()<ignoreCloudUntil)return Promise.resolve(null);
   return cloudRequest("state",{child:state.activeChild}).then(applyCloudState).catch(()=>null);
 }
