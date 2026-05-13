@@ -117,7 +117,7 @@
       </div>
       <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
       <div class="prize-banner" id="prizeBanner">🎉 BIG PRIZE READY! 🎉</div>
-      <button class="claim-btn" id="claimPrize" type="button">Prize Claimed — Reset Points</button>
+      <button class="claim-btn" id="claimPrize" type="button">Prize Claimed — Spend Points</button>
     </section>
 
     <section class="quick-actions">
@@ -570,18 +570,33 @@ function parentReset(){
 function claimPrize(){
   const max=maxReward();
   if(!max)return;
-  if(!confirm(`${state.activeChild} claimed: ${max.label}. Reset ${state.activeChild}'s points to 0?`))return;
+
+  const rewardCost=Number(max.points||0);
+  const currentPoints=Number(childState().points||0);
+  const remainingPoints=Math.max(0,currentPoints-rewardCost);
+
+  if(!confirm(`${state.activeChild} claimed: ${max.label}. Spend ${rewardCost} points and keep ${remainingPoints} leftover point${remainingPoints===1?"":"s"}?`))return;
+
   const eventId=makeEventId("claim",state.activeChild,"Prize claimed",max.label);
-  resetLocalChild(state.activeChild);
+
+  // Prize claims spend only the reward cost. Extra points carry over after redemption.
+  childState().points=remainingPoints;
+  childState().log.push({
+    points:-rewardCost,
+    label:`Prize claimed: ${max.label}`,
+    time:new Date().toLocaleTimeString([],{hour:"numeric",minute:"2-digit"})
+  });
+
   saveState();
   render();
+
   ignoreCloudUntil=Date.now()+20000;
   setActionLock(true);
   els.claimPrize.textContent="Saving prize claim...";
-  cloudRequest("claim",{child:state.activeChild,parent:PARENT_NAME,prize:max.label,points:max.points,eventId})
+  cloudRequest("claim",{child:state.activeChild,parent:PARENT_NAME,prize:max.label,points:rewardCost,eventId})
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
     .catch(()=>{})
-    .finally(()=>{els.claimPrize.textContent="Prize Claimed — Reset Points";setActionLock(false);render();});
+    .finally(()=>{els.claimPrize.textContent="Prize Claimed — Spend Points";setActionLock(false);render();});
 }
 
 function resetLocalChild(child){
