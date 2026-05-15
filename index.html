@@ -171,6 +171,8 @@
         <div class="reward-edit-row"><div><label for="rewardPts4">Points</label><input id="rewardPts4" type="number" min="1" step="1" /></div><div><label for="reward4">Reward 4</label><input id="reward4" /></div></div>
         <div class="hint">Activity point values below only affect future points. Existing banked points do not change.</div>
         <div id="activityPointSettings" class="settings"></div>
+        <div class="hint">Create extra one-tap earning buttons for the selected child. Leave the name blank to remove it.</div>
+        <div id="customEarningSettings" class="settings"></div>
         <button class="control-btn primary" id="saveSettings" type="button">Save Settings</button>
       </div>
     </section>
@@ -208,6 +210,7 @@ const ROUTINES={
     {id:"giveSpace",title:"Give Space",subtitle:"Space, not bossing",iconIndex:2,script:"Your job is space, not bossing. Let Zach work.",steps:[{id:"space",label:"Gave Zach space when asked",points:2}],bonus:0},
     {id:"brotherHelper",title:"Brother Helper",subtitle:"Helped calmly when asked",iconIndex:3,script:"Help only when asked. Calm helping earns.",steps:[{id:"help",label:"Helped Zach calmly when asked",points:2}],bonus:0},
     {id:"parentHelper",title:"Mom & Dad Helper",subtitle:"Helped mom or dad",iconIndex:5,script:"Big kid helper: help Mom or Dad when asked, then get back to your job.",steps:[{id:"parentHelp",label:"Helped Mom or Dad",points:2}],bonus:0},
+    {id:"dirtyClothes",title:"Dirty Clothes",subtitle:"Clothes in hamper",iconIndex:4,script:"Big kid job: put your dirty clothes in the hamper.",steps:[{id:"hamper",label:"Put dirty clothes in hamper",points:1}],bonus:0},
     {id:"bedtimeReady",title:"Bedtime Routine",subtitle:"Finished bedtime routine",iconIndex:4,script:"Big Kid bedtime: finish your bedtime routine calmly.",steps:[{id:"bed",label:"Finished bedtime routine",points:1}],bonus:0},
     {id:"kindBody",title:"Kind and Safe",subtitle:"Kind words, safe body",iconIndex:5,script:"Kind words and safe body with your brother.",steps:[{id:"kind",label:"Used kind words and safe body",points:2}],bonus:0}
   ]
@@ -216,8 +219,8 @@ const ROUTINES={
 const defaultState={
   activeChild:"Zach",
   children:{
-    Zach:{points:0,log:[],theme:CHILDREN.Zach.theme,rewards:CHILDREN.Zach.rewards,routineProgress:{},activityPoints:{}},
-    Joseph:{points:0,log:[],theme:CHILDREN.Joseph.theme,rewards:CHILDREN.Joseph.rewards,routineProgress:{},activityPoints:{}}
+    Zach:{points:0,log:[],theme:CHILDREN.Zach.theme,rewards:CHILDREN.Zach.rewards,routineProgress:{},activityPoints:{},customActivities:[]},
+    Joseph:{points:0,log:[],theme:CHILDREN.Joseph.theme,rewards:CHILDREN.Joseph.rewards,routineProgress:{},activityPoints:{},customActivities:[]}
   }
 };
 
@@ -230,7 +233,7 @@ let actionInFlight=false;
 
 const $=id=>document.getElementById(id);
 const els={
-  todayLabel:$("todayLabel"),score:$("score"),scoreLabel:$("scoreLabel"),scoreCard:$("scoreCard"),rewardHeader:$("rewardHeader"),nextReward:$("nextReward"),progressBar:$("progressBar"),prizeBanner:$("prizeBanner"),claimPrize:$("claimPrize"),routineGrid:$("routineGrid"),logTitle:$("logTitle"),logList:$("logList"),themeButton:$("themeButton"),routineModal:$("routineModal"),modalIcon:$("modalIcon"),modalRoutineTitle:$("modalRoutineTitle"),scriptBox:$("scriptBox"),stepsList:$("stepsList"),closeRoutine:$("closeRoutine"),finishTask:$("finishTask"),safeBonus:$("safeBonus"),addCustom:$("addCustom"),undoPoint:$("undoPoint"),parentReset:$("parentReset"),settingsButton:$("settingsButton"),settingsModal:$("settingsModal"),settingsTitle:$("settingsTitle"),settingsHint:$("settingsHint"),closeSettings:$("closeSettings"),themeSelect:$("themeSelect"),rewardPts1:$("rewardPts1"),rewardPts2:$("rewardPts2"),rewardPts3:$("rewardPts3"),rewardPts4:$("rewardPts4"),reward1:$("reward1"),reward2:$("reward2"),reward3:$("reward3"),reward4:$("reward4"),saveSettings:$("saveSettings"),activityPointSettings:$("activityPointSettings")
+  todayLabel:$("todayLabel"),score:$("score"),scoreLabel:$("scoreLabel"),scoreCard:$("scoreCard"),rewardHeader:$("rewardHeader"),nextReward:$("nextReward"),progressBar:$("progressBar"),prizeBanner:$("prizeBanner"),claimPrize:$("claimPrize"),routineGrid:$("routineGrid"),logTitle:$("logTitle"),logList:$("logList"),themeButton:$("themeButton"),routineModal:$("routineModal"),modalIcon:$("modalIcon"),modalRoutineTitle:$("modalRoutineTitle"),scriptBox:$("scriptBox"),stepsList:$("stepsList"),closeRoutine:$("closeRoutine"),finishTask:$("finishTask"),safeBonus:$("safeBonus"),addCustom:$("addCustom"),undoPoint:$("undoPoint"),parentReset:$("parentReset"),settingsButton:$("settingsButton"),settingsModal:$("settingsModal"),settingsTitle:$("settingsTitle"),settingsHint:$("settingsHint"),closeSettings:$("closeSettings"),themeSelect:$("themeSelect"),rewardPts1:$("rewardPts1"),rewardPts2:$("rewardPts2"),rewardPts3:$("rewardPts3"),rewardPts4:$("rewardPts4"),reward1:$("reward1"),reward2:$("reward2"),reward3:$("reward3"),reward4:$("reward4"),saveSettings:$("saveSettings"),activityPointSettings:$("activityPointSettings"),customEarningSettings:$("customEarningSettings")
 };
 
 init();
@@ -275,6 +278,33 @@ function bindEvents(){
 function childState(child=state.activeChild){return state.children[child]}
 function childTheme(child=state.activeChild){return childState(child).theme||CHILDREN[child].theme||"dino"}
 function childRewards(child=state.activeChild){return childState(child).rewards||CHILDREN[child].rewards}
+function customActivities(child=state.activeChild){
+  const current=childState(child);
+  current.customActivities=Array.isArray(current.customActivities)?current.customActivities:[];
+  return current.customActivities;
+}
+function normalizeCustomActivity(item,index){
+  const title=String(item?.title||"").trim();
+  const points=Math.max(0,Number(item?.points||1));
+  const id=String(item?.id||`custom_${index}_${title.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")}`).trim();
+  return {
+    id:id||`custom_${index}`,
+    title,
+    subtitle:`Custom earning · +${points}`,
+    iconIndex:5,
+    script:`Custom earning: ${title}`,
+    steps:[{id:"done",label:title,points}],
+    bonus:0,
+    isCustom:true
+  };
+}
+function getAllRoutines(child=state.activeChild){
+  const builtIn=ROUTINES[child]||[];
+  const custom=customActivities(child)
+    .map(normalizeCustomActivity)
+    .filter(item=>item.title&&item.steps[0].points>0);
+  return [...builtIn,...custom];
+}
 function activeTheme(){return THEMES[childTheme()]||THEMES.dino}
 function activityConfig(child=state.activeChild){
   const current=childState(child);
@@ -341,7 +371,7 @@ function render(){
 
 function renderRoutines(theme){
   els.routineGrid.innerHTML="";
-  (ROUTINES[state.activeChild]||[]).forEach(routine=>{
+  getAllRoutines().forEach(routine=>{
     const progress=getRoutineProgress(routine.id);
     const completedSteps=progress.steps?.length||0;
     const total=routine.steps.reduce((sum,step)=>sum+getStepPoints(routine.id,step),0)+getBonusPoints(routine);
@@ -374,7 +404,7 @@ function renderLog(){
 }
 
 function openRoutine(id){
-  activeRoutine=(ROUTINES[state.activeChild]||[]).find(routine=>routine.id===id);
+  activeRoutine=getAllRoutines().find(routine=>routine.id===id);
   if(!activeRoutine)return;
   const progress=getRoutineProgress(activeRoutine.id);
   activeStepIds=new Set(progress.steps||[]);
@@ -615,12 +645,13 @@ function openSettings(){
     els[`reward${index+1}`].value=rewards[index]?.label||"";
   });
   renderActivityPointSettings();
+  renderCustomEarningSettings();
   els.settingsModal.classList.add("open");
 }
 
 function renderActivityPointSettings(){
   els.activityPointSettings.innerHTML="";
-  (ROUTINES[state.activeChild]||[]).forEach(routine=>{
+  getAllRoutines().forEach(routine=>{
     const card=document.createElement("div");
     card.className="activity-card";
     const rows=routine.steps.map(step=>{
@@ -633,6 +664,21 @@ function renderActivityPointSettings(){
     card.innerHTML=`<h3>${routine.title}</h3>${rows}${bonusRow}`;
     els.activityPointSettings.appendChild(card);
   });
+}
+function renderCustomEarningSettings(){
+  els.customEarningSettings.innerHTML="";
+  const existing=customActivities();
+  for(let index=0;index<4;index++){
+    const item=existing[index]||{title:"",points:1};
+    const card=document.createElement("div");
+    card.className="activity-card";
+    card.innerHTML=`
+      <h3>Custom Button ${index+1}</h3>
+      <div class="activity-row"><span>Name</span><input data-custom-title="${index}" value="${String(item.title||"").replace(/"/g,"&quot;")}" placeholder="Example: Put clothes in hamper" /></div>
+      <div class="activity-row"><span>Points</span><input data-custom-points="${index}" type="number" min="0" step="1" value="${Number(item.points||1)}" /></div>
+    `;
+    els.customEarningSettings.appendChild(card);
+  }
 }
 function closeSettings(){els.settingsModal.classList.remove("open")}
 
@@ -654,6 +700,22 @@ function saveSettings(){
   });
   childState().activityPoints=newActivityConfig;
 
+  const newCustomActivities=[];
+  for(let index=0;index<4;index++){
+    const titleInput=els.customEarningSettings.querySelector(`[data-custom-title="${index}"]`);
+    const pointsInput=els.customEarningSettings.querySelector(`[data-custom-points="${index}"]`);
+    const title=(titleInput?.value||"").trim();
+    const points=Number(pointsInput?.value||0);
+    if(title&&Number.isFinite(points)&&points>0){
+      newCustomActivities.push({
+        id:`custom_${index}_${title.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")}`,
+        title,
+        points
+      });
+    }
+  }
+  childState().customActivities=newCustomActivities;
+
   saveState();
   render();
   cloudRequest("settings",{
@@ -661,6 +723,7 @@ function saveSettings(){
     theme:childState().theme,
     rewards:JSON.stringify(childState().rewards),
     activityPoints:JSON.stringify(childState().activityPoints),
+    customActivities:JSON.stringify(childState().customActivities),
     parent:PARENT_NAME,
     eventId:makeEventId("settings",state.activeChild,"","settings")
   })
@@ -675,7 +738,7 @@ function cycleTheme(){
   childState().theme=keys[(currentIndex+1)%keys.length];
   saveState();
   render();
-  cloudRequest("settings",{child:state.activeChild,theme:childState().theme,rewards:JSON.stringify(childRewards()),activityPoints:JSON.stringify(activityConfig()),parent:PARENT_NAME,eventId:makeEventId("settings",state.activeChild,"","theme")})
+  cloudRequest("settings",{child:state.activeChild,theme:childState().theme,rewards:JSON.stringify(childRewards()),activityPoints:JSON.stringify(activityConfig()),customActivities:JSON.stringify(customActivities()),parent:PARENT_NAME,eventId:makeEventId("settings",state.activeChild,"","theme")})
     .then(cloud=>{ignoreCloudUntil=0;applyCloudState(cloud)})
     .catch(()=>{});
 }
@@ -699,6 +762,7 @@ function applyCloudState(cloud){
         if(cloud.children[child].theme&&THEMES[cloud.children[child].theme]) state.children[child].theme=cloud.children[child].theme;
         if(Array.isArray(cloud.children[child].rewards)&&cloud.children[child].rewards.length) state.children[child].rewards=cloud.children[child].rewards;
         if(cloud.children[child].activityPoints&&typeof cloud.children[child].activityPoints==="object") state.children[child].activityPoints=cloud.children[child].activityPoints;
+        if(Array.isArray(cloud.children[child].customActivities)) state.children[child].customActivities=cloud.children[child].customActivities;
         rebuildRoutineProgressFromLog(child);
       }
     });
@@ -711,7 +775,7 @@ function applyCloudState(cloud){
 function rebuildRoutineProgressFromLog(child){
   const currentChildState=state.children[child];
   currentChildState.routineProgress=currentChildState.routineProgress||{};
-  const routines=ROUTINES[child]||[];
+  const routines=getAllRoutines(child);
   const activeProgress=currentChildState.routineProgress;
 
   // Preserve in-progress local checkmarks. Do not rebuild completed/cleared tasks from banked log.
@@ -765,6 +829,7 @@ function loadState(){
       merged.children[child].points=Number(merged.children[child].points||0);
       merged.children[child].routineProgress=merged.children[child].routineProgress||{};
       merged.children[child].activityPoints=merged.children[child].activityPoints||{};
+      merged.children[child].customActivities=Array.isArray(merged.children[child].customActivities)?merged.children[child].customActivities:[];
     });
     return merged;
   }catch(error){
