@@ -446,6 +446,7 @@ function toggleStep(stepId){
   const progress=getRoutineProgress(activeRoutine.id);
   progress.steps=Array.from(activeStepIds);
   saveState();
+  syncRoutineProgressToCloud();
   renderSteps();
   renderRoutines(activeTheme());
   addPoints(getStepPoints(activeRoutine.id,step),`${activeRoutine.title}: ${step.label}`,activeRoutine.title);
@@ -477,6 +478,7 @@ function undoSavedStep(step){
   }
 
   saveState();
+  syncRoutineProgressToCloud();
   renderSteps();
   render();
 
@@ -504,6 +506,22 @@ function getRoutineProgress(routineId,child=state.activeChild){
   return currentChildState.routineProgress[routineId];
 }
 
+function syncRoutineProgressToCloud(child=state.activeChild){
+  if(!CLOUD_WEB_APP_URL)return;
+  const currentChildState=state.children[child];
+  const eventId=makeEventId("progress",child,"routineProgress","save");
+  cloudRequest("progress",{
+    child,
+    routineProgress:JSON.stringify(currentChildState.routineProgress||{}),
+    parent:PARENT_NAME,
+    eventId
+  }).then(cloud=>{
+    if(cloud&&cloud.ok){
+      applyCloudState(cloud);
+    }
+  }).catch(()=>{});
+}
+
 function finishActiveTask(){
   if(!activeRoutine)return;
   const progress=getRoutineProgress(activeRoutine.id);
@@ -527,6 +545,7 @@ function clearRoutineProgress(routineId,child=state.activeChild){
   currentChildState.routineProgress=currentChildState.routineProgress||{};
   currentChildState.routineProgress[routineId]={steps:[],bonusAwarded:false};
   saveState();
+  syncRoutineProgressToCloud(child);
 }
 
 function closeRoutineModal(){
@@ -763,6 +782,7 @@ function applyCloudState(cloud){
         if(Array.isArray(cloud.children[child].rewards)&&cloud.children[child].rewards.length) state.children[child].rewards=cloud.children[child].rewards;
         if(cloud.children[child].activityPoints&&typeof cloud.children[child].activityPoints==="object") state.children[child].activityPoints=cloud.children[child].activityPoints;
         if(Array.isArray(cloud.children[child].customActivities)) state.children[child].customActivities=cloud.children[child].customActivities;
+        if(cloud.children[child].routineProgress&&typeof cloud.children[child].routineProgress==="object") state.children[child].routineProgress=cloud.children[child].routineProgress;
         rebuildRoutineProgressFromLog(child);
       }
     });
